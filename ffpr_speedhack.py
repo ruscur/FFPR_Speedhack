@@ -12,7 +12,10 @@ SPEED_TO_HEX = {"1.5x": b"\x00\x00\xc0\x3f",
                 "3x": b"\x00\x00\x40\x40",
                 "4x": b"\x00\x00\x80\x40",
                 "5x": b"\x00\x00\xa0\x40"}
-
+# 1: e8 da ce f7 ff 84 c0 0f 84 c5 00 00 00 f3 0f 59 35 92 87 35 00 e9 b8 00 00 00 33 c9 e8 3e c6 e1 ff 0f 57 f6
+# 2: e8 ba 23 f9 ff 84 c0 0f 84 c5 00 00 00 f3 0f 59 35 62 50 51 01 e9 b8 00 00 00 33 c9 e8 8e 4a fc 00 0f 57 f6
+# 5: e8 3a 58 07 00 84 c0 0f 84 c5 00 00 00 f3 0f 59 35 fa d0 64 01 e9 b8 00 00 00 33 c9 e8 0e 3c 0b 01 0f 57 f6
+# 6: e8 ec 30 15 00 84 c0 0f 84 c4 00 00 00 f3 0f 59 35 04 40 d4 00 e9 b7 00 00 00 33 c9 e8 f0 d3 c4 ff 0f 57 f6
 always_fast = False
 autobattle_speed = "1.5x"
 
@@ -32,6 +35,7 @@ for section in pe.sections:
         offset = section.VirtualAddress
         code = section.get_data()
         code_size = len(code)
+        print("Section offset %x code_size %x" % (offset, code_size))
         break
 # Find our marker for the autobattle flag function
 autobattle_flag_pos = code.index(AUTOBATTLE_FLAG_MARKER)
@@ -39,39 +43,72 @@ autobattle_flag_pos = code.index(AUTOBATTLE_FLAG_MARKER)
 autobattle_fn_start = autobattle_flag_pos - 100 + (code[autobattle_flag_pos-100:autobattle_flag_pos].rfind(b'\xcc')  +1)
 print("Found autobattle flag function at il2cpp section offset 0x%x\n" % autobattle_fn_start)
 
-print("Disassembling (may be slow)...\n")
-call = None
-test = None
-je = None
-mulss = None
+found = False
+pos = 0
 
-# Disassembling the entire section is a gigantic memory hog
-steps = 0x10000
-index = 0
-while steps*index < code_size:
-    for i in md.disasm(code[index*steps:(index+1)*steps], offset+(index*steps)):
-        if je is not None:
-            if i.mnemonic == "mulss":
-                mulss = i
-                break
-        if test is not None:
-            if i.mnemonic == "je":
-                je = i
-        if call is not None:
-            if i.mnemonic == "test" and i.op_str == "al, al":
-                test = i
-            elif i.mnemonic == "cmp" and i.op_str == "al, 0xff":
-                test = i
-                always_fast = True
-            else:
-                call = None
-            continue
-        if i.mnemonic == "call":
-            if i.op_str == hex(offset+autobattle_fn_start):
-                call = i
-    if mulss is not None:
-        break
-    index += 1
+print("Locating victim code...")
+while True:
+    loc = code[pos:].find(b'\x00\x00\x00\xf3\x0f\x59\x35')
+    pos += loc + 1
+    if loc == -1:
+        print("Failed to find victim code, are you using a stock DLL?")
+        sys.exit(1)
+
+    start = pos - 11
+
+    if code[start] != 0xe8:
+        continue
+    if code[start:].find(b'\x84\xc0\x0f\x84') != 5:
+        continue
+    if code[start + 21] != 0xe9:
+        continue
+    if code[start:].find(b'\x00\x00\x00\x33\xc9\xe8') != 23:
+        continue
+    if code[start:].find(b'\x0f\x57\xf6') != 33:
+        continue
+
+    pos = start
+    break
+
+print("Victim found at 0x%x" % pos)
+je = None
+test = None
+call = None
+mulss = None
+# Leftover from when I used to disassemble lots of code, could just be replaced
+# with disassembling instruction by instruction
+for i in md.disasm(code[pos:pos+100], offset+pos):
+    if je is not None:
+        if i.mnemonic == "mulss":
+            mulss = i
+            break
+        else:
+            test = None
+            call = None
+            je = None
+    if test is not None:
+        if i.mnemonic == "je":
+            je = i
+        else:
+            test = None
+            call = None
+    if call is not None:
+        if i.mnemonic == "test" and i.op_str == "al, al":
+            test = i
+        elif i.mnemonic == "cmp" and i.op_str == "al, 0xff":
+            test = i
+            always_fast = True
+        else:
+            call = None
+        continue
+    if i.mnemonic == "call":
+        if i.op_str == hex(offset+autobattle_fn_start):
+            call = i
+            print(call, hex(i.address))
+
+if mulss is None:
+    print("Somehow messed up disassembling the victim code!")
+    sys.exit(1)
 
 for i in mulss.operands:
     if i.type == X86_OP_MEM:

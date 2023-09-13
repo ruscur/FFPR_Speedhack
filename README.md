@@ -28,7 +28,7 @@ If a game update resets your changes, you should just be able to run the script 
 
 This cannot brick your game, if something does go wrong you can restore your backup file/reinstall.  It certainly doesn't go near your saves or anything else important.
 
-This isn't thoroughly tested on all the games, especially FFV and FFVI since they're not out yet.  Open an issue if something doesn't work.
+This isn't thoroughly tested on all the games - the disassembly and DLL creation works, but I haven't played them all to check it actually works in game (though I don't know why it wouldn't).  Open an issue if something doesn't work.
 
 ## Why?
 
